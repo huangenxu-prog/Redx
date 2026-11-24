@@ -13,14 +13,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: '1.26.x'
           cache: false
       - name: Build Go bridge
         working-directory: bridge
         run: |
           set -euo pipefail
           go mod tidy
-          go get golang.org/x/mobile/bind@latest
+          go get -tool golang.org/x/mobile/cmd/gobind@v0.0.0-20261117202452-47699113848a
+          go mod tidy
+          go mod download all
+          export GOFLAGS=-mod=mod
+          GOOS=ios GOARCH=arm64 go list -m -json -tags=ios all > /tmp/redx-modules.json
           MOBILE_VERSION=$(go list -m -f '{{.Version}}' golang.org/x/mobile)
           go install golang.org/x/mobile/cmd/gomobile@$MOBILE_VERSION
           go install golang.org/x/mobile/cmd/gobind@$MOBILE_VERSION
@@ -30,7 +34,7 @@ jobs:
           mkdir -p ../Frameworks ../RedX/Resources
           UPSTREAM=$(go list -m -f '{{.Dir}}' github.com/tamnd/xiaohongshu-cli)
           cp "$UPSTREAM/LICENSE" ../RedX/Resources/Upstream-LICENSE.txt
-          gomobile bind -target=ios/arm64 -iosversion=17.0 -o ../Frameworks/RedBridge.xcframework .
+          gomobile bind -v -x -target=ios/arm64 -iosversion=17.0 -o ../Frameworks/RedBridge.xcframework .
           find ../Frameworks -name '*.h' -o -name module.modulemap
       - name: Build iOS app
         run: |
