@@ -1,0 +1,24 @@
+name: RedX
+options:
+  bundleIdPrefix: com.redx
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  RedX:
+    type: application
+    platform: iOS
+    sources: [RedX]
+    dependencies:
+      - framework: Frameworks/RedBridge.xcframework
+        embed: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.redx.reader
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: RedX
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGNING_ALLOWED: NO
