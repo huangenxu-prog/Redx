@@ -1,6 +1,6 @@
 import SwiftUI
 import AVKit
-import Redbridge
+import RedBridge
 
 private struct Envelope<T: Decodable>: Decodable {
     let data: T?
@@ -67,6 +67,11 @@ private func decode<T: Decodable>(_ type: T.Type, _ raw: String?) throws -> Enve
                                 Text(item.nickname).font(.caption).foregroundStyle(.secondary)
                             }.foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
                         }.buttonStyle(.plain)
+                        .onAppear {
+                            if item.id == items.last?.id && !exhausted && !busy {
+                                Task { await load(reset: false) }
+                            }
+                        }
                     }
                 }.padding(.horizontal)
                 if busy { ProgressView().padding() }
@@ -75,9 +80,6 @@ private func decode<T: Decodable>(_ type: T.Type, _ raw: String?) throws -> Enve
                     Button(items.isEmpty ? "重新加载" : "加载更多") {
                         Task { await load(reset: items.isEmpty) }
                     }.padding()
-                    if !items.isEmpty && !exhausted {
-                        Color.clear.frame(height: 1).task { await load(reset: false) }
-                    }
                 }
             }
             .navigationTitle("发现")
