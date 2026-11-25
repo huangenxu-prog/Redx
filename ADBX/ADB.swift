@@ -97,6 +97,7 @@ final class ADB {
     private var fd: Int32 = -1
     private var nextID: UInt32 = 1
     private var version: UInt32 = 0x01000000
+    var isConnected: Bool { fd >= 0 }
     deinit { close() }
     func close() { if fd >= 0 { Darwin.close(fd); fd = -1 }; version = 0x01000000 }
     private func writeAll(_ data: Data) throws {
@@ -182,6 +183,83 @@ final class ADB {
             }
             throw ADBError.message("ADB authentication failed")
         } catch { close(); throw error }
+    }
+    func installAPK(_ url: URL, progress: (Double?) -> Void) throws -> String {
+        guard fd >= 0 else { throw ADBError.message("未连接电视") }
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        guard url.pathExtension.lowercased() == "apk" else { throw ADBError.message("请选择 APK 文件") }
+        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size > 0 else { throw ADBError.message("APK 文件为空") }
+        let file = try FileHandle(forReadingFrom: url)
+        defer { try? file.close() }
+        let path = "/data/local/tmp/adbx-" + UUID().uuidString + ".apk"
+        let local = nextID; nextID &+= 1
+        var remote: UInt32 = 0
+        var pending = Data()
+        func record(_ name: String, _ data: Data) -> Data {
+            var d = Data(name.utf8); d.word(UInt32(data.count)); d.append(data); return d
+        }
+        func writeStream(_ data: Data) throws {
+            var offset = 0
+            while offset < data.count {
+                let end = min(offset + 4096, data.count)
+                try send("WRTE", local, remote, data.subdata(in: offset..<end))
+                while true {
+                    let p = try receive()
+                    guard p.b == local, p.a == remote else { throw ADBError.message("ADB stream mismatch") }
+                    if p.cmd == tag("OKAY") { break }
+                    if p.cmd == tag("WRTE") {
+                        pending.append(p.data); try send("OKAY", local, remote)
+                        if pending.count >= 8 && pending.wordAt(0) == tag("FAIL") { throw ADBError.message("电视拒绝文件传输：" + String(decoding: pending.dropFirst(8), as: UTF8.self)) }
+                    } else { throw ADBError.message("ADB file stream closed") }
+                }
+                offset = end
+            }
+        }
+        do {
+            try send("OPEN", local, 0, Data("sync:\0".utf8))
+            let opened = try receive()
+            guard opened.cmd == tag("OKAY"), opened.b == local, opened.a != 0 else { throw ADBError.message("电视不支持 ADB 文件传输") }
+            remote = opened.a
+            try writeStream(record("SEND", Data((path + ",33188").utf8)))
+            var sent = 0
+            while let chunk = try file.read(upToCount: 65536), !chunk.isEmpty {
+                try writeStream(record("DATA", chunk))
+                sent += chunk.count
+                progress(min(1, Double(sent) / Double(size)))
+            }
+            guard sent == size else { throw ADBError.message("APK 文件大小发生变化") }
+            var done = Data("DONE".utf8); done.word(UInt32(Date().timeIntervalSince1970))
+            try writeStream(done)
+            while pending.count < 8 || (pending.wordAt(0) == tag("FAIL") && pending.count < 8 + Int(pending.wordAt(4))) {
+                let p = try receive()
+                guard p.cmd == tag("WRTE"), p.a == remote, p.b == local else { throw ADBError.message("未收到文件传输结果") }
+                pending.append(p.data); try send("OKAY", local, remote)
+                guard pending.count <= 65536 else { throw ADBError.message("Invalid SYNC response") }
+            }
+            guard pending.wordAt(0) == tag("OKAY") else {
+                throw ADBError.message("电视文件写入失败：" + String(decoding: pending.dropFirst(8), as: UTF8.self))
+            }
+            try send("CLSE", local, remote)
+            let closed = try receive()
+            guard closed.cmd == tag("CLSE"), closed.b == local else { throw ADBError.message("文件通道关闭失败") }
+        } catch {
+            close()
+            throw ADBError.message(error.localizedDescription + "；连接已断开，电视可能残留临时文件：" + path)
+        }
+        progress(nil)
+        do {
+            let result = try shell("pm install -r '" + path + "'")
+            _ = try? shell("rm -f '" + path + "'")
+            guard result.components(separatedBy: .newlines).contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "Success" }) else {
+                throw ADBError.message("安装失败：" + result)
+            }
+            return result
+        } catch {
+            _ = try? shell("rm -f '" + path + "'")
+            throw error
+        }
     }
     func shell(_ command: String) throws -> String {
         guard fd >= 0 else { throw ADBError.message("未连接电视") }

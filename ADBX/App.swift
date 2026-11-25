@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct TV: Codable, Identifiable, Equatable {
     var id = UUID()
@@ -12,6 +13,9 @@ struct TV: Codable, Identifiable, Equatable {
     @Published var busy = false
     @Published var status = "未连接"
     @Published var output = ""
+    @Published var installProgress: Double?
+    @Published var installing = false
+    @Published var installMessage: String?
     @Published var packages: [String] = []
     private let adb = ADB()
     private let queue = DispatchQueue(label: "adbx.connection")
@@ -37,6 +41,36 @@ struct TV: Codable, Identifiable, Equatable {
         guard !busy else { return }
         connected = nil; packages = []; status = "未连接"
         let client = adb; queue.async { client.close() }
+    }
+    func install(_ url: URL) {
+        guard !busy, connected != nil else { return }
+        busy = true; installing = true; installProgress = 0
+        status = "正在上传 APK"
+        let client = adb
+        queue.async {
+            var lastPercent = -1
+            let result = Result {
+                try client.installAPK(url) { fraction in
+                    let percent = fraction.map { Int($0 * 100) } ?? 101
+                    guard percent != lastPercent else { return }
+                    lastPercent = percent
+                    DispatchQueue.main.async {
+                        self.installProgress = fraction
+                        self.status = fraction == nil ? "电视正在安装 APK" : "正在上传 APK"
+                    }
+                }
+            }
+            let stillConnected = client.isConnected
+            DispatchQueue.main.async {
+                self.busy = false; self.installing = false; self.installProgress = nil
+                if !stillConnected { self.connected = nil }
+                self.status = stillConnected ? "已连接" : "连接已断开"
+                switch result {
+                case .success(let message): self.installMessage = "安装成功：" + url.lastPathComponent; self.output += "\n" + message
+                case .failure(let error): self.installMessage = error.localizedDescription; self.output += "\n" + error.localizedDescription
+                }
+            }
+        }
     }
     func run(_ command: String, list: Bool = false) {
         guard !busy, connected != nil, !command.isEmpty else { return }
@@ -70,6 +104,7 @@ struct Root: View {
     @State private var command = ""
     @State private var selectedPackage: String?
     @State private var uninstall = false
+    @State private var pickingAPK = false
     var body: some View {
         TabView {
             NavigationStack {
@@ -97,6 +132,15 @@ struct Root: View {
                         Button("Android 版本") { model.run("getprop ro.build.version.release") }
                         Button("存储空间") { model.run("df -h") }
                     }.disabled(model.connected == nil || model.busy)
+                    Section("APK 安装") {
+                        Button("安装 APK 到电视", systemImage: "square.and.arrow.up") { pickingAPK = true }
+                            .disabled(model.connected == nil || model.busy)
+                        if model.installing {
+                            if let value = model.installProgress {
+                                ProgressView(value: value) { Text("上传 \(Int(value * 100))%") }
+                            } else { ProgressView("电视正在安装") }
+                        }
+                    }
                     Section("应用管理") {
                         Button("刷新已安装的第三方应用") { model.run("pm list packages -3", list: true) }.disabled(model.connected == nil || model.busy)
                         ForEach(model.packages, id: \.self) { pkg in
@@ -108,6 +152,15 @@ struct Root: View {
                         }
                     }
                 }.navigationTitle("ADBX").toolbar { Button("添加", systemImage: "plus") { adding = true } }
+                .fileImporter(isPresented: $pickingAPK, allowedContentTypes: [UTType(filenameExtension: "apk") ?? .data]) { result in
+                    switch result {
+                    case .success(let url): model.install(url)
+                    case .failure(let error): model.installMessage = error.localizedDescription
+                    }
+                }
+                .alert("APK 安装结果", isPresented: Binding(get: { model.installMessage != nil }, set: { if !$0 { model.installMessage = nil } })) {
+                    Button("确定") { model.installMessage = nil }
+                } message: { Text(model.installMessage ?? "") }
                 .confirmationDialog("确认卸载应用？", isPresented: $uninstall, titleVisibility: .visible) {
                     Button("卸载", role: .destructive) { if let p = selectedPackage { model.run("pm uninstall " + quoted(p)) } }
                 }
