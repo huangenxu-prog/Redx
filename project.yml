@@ -1,24 +1,21 @@
-name: RedX
+name: ADBX
 options:
-  bundleIdPrefix: com.redx
   deploymentTarget:
     iOS: "17.0"
 targets:
-  RedX:
+  ADBX:
     type: application
     platform: iOS
-    sources: [RedX]
-    dependencies:
-      - framework: Frameworks/RedBridge.xcframework
-        embed: false
+    sources: [ADBX]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.redx.reader
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: RedX
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        MARKETING_VERSION: "0.1"
-        CURRENT_PROJECT_VERSION: "1"
+        PRODUCT_BUNDLE_IDENTIFIER: com.xiaoxiao.adbx
         SWIFT_VERSION: "5.0"
-        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: ADBX
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: Connect to your Android TV using ADB.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGNING_ALLOWED: NO

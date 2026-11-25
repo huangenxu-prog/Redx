@@ -1,4 +1,4 @@
-name: RedX iOS
+name: ADBX iOS
 on:
   push:
     branches: [main]
@@ -8,45 +8,24 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.26.x'
-          cache: false
-      - name: Build Go bridge
-        working-directory: bridge
+      - name: Generate icon and project
         run: |
           set -euo pipefail
-          go mod tidy
-          go get -tool golang.org/x/mobile/cmd/gobind@v0.0.0-20261117202452-47699113848a
-          go mod tidy
-          go mod download all
-          export GOFLAGS=-mod=mod
-          GOOS=ios GOARCH=arm64 go list -m -json -tags=ios all > /tmp/redx-modules.json
-          MOBILE_VERSION=$(go list -m -f '{{.Version}}' golang.org/x/mobile)
-          go install golang.org/x/mobile/cmd/gomobile@$MOBILE_VERSION
-          go install golang.org/x/mobile/cmd/gobind@$MOBILE_VERSION
-          export PATH="$(go env GOPATH)/bin:$PATH"
-          go test ./...
-          gomobile init
-          mkdir -p ../Frameworks ../RedX/Resources
-          UPSTREAM=$(go list -m -f '{{.Dir}}' github.com/tamnd/xiaohongshu-cli)
-          cp "$UPSTREAM/LICENSE" ../RedX/Resources/Upstream-LICENSE.txt
-          gomobile bind -v -x -target=ios/arm64 -iosversion=17.0 -o ../Frameworks/RedBridge.xcframework .
-          find ../Frameworks -name '*.h' -o -name module.modulemap
+          swift scripts/icon.swift
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          xcodegen generate
       - name: Build iOS app
         run: |
           set -euo pipefail
-          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
-          xcodegen generate
-          xcodebuild -project RedX.xcodeproj -scheme RedX -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          xcodebuild -project ADBX.xcodeproj -scheme ADBX -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
           mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/RedX.app Payload/
-          /usr/bin/zip -qry RedX.ipa Payload
+          cp -R build/Build/Products/Release-iphoneos/ADBX.app Payload/
+          /usr/bin/zip -qry ADBX.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: RedX-unsigned-IPA
-          path: RedX.ipa
+          name: ADBX-unsigned-IPA
+          path: ADBX.ipa
           if-no-files-found: error
