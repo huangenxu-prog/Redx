@@ -105,10 +105,41 @@ struct Root: View {
     @State private var selectedPackage: String?
     @State private var uninstall = false
     @State private var pickingAPK = false
+    @State private var pendingAPK: URL?
     var body: some View {
         TabView {
             NavigationStack {
                 List {
+                    Section {
+                        Button {
+                            pickingAPK = true
+                        } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: "square.and.arrow.up").font(.title2)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text("安装 APK").font(.headline)
+                                    Text(model.connected == nil ? "从文件选择 APK，连接电视后安装" : "从文件选择 APK，直接安装到电视").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                            }.padding(.vertical, 8)
+                        }.disabled(model.busy)
+                        if let url = pendingAPK {
+                            Text(url.lastPathComponent).font(.footnote).lineLimit(2)
+                            if model.connected == nil {
+                                Text("请选择下方电视连接，然后点击安装").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Button("安装到 \(model.connected?.name ?? "电视")") {
+                                if let url = pendingAPK { pendingAPK = nil; model.install(url) }
+                            }.disabled(model.connected == nil || model.busy)
+                            Button("取消选择", role: .cancel) { pendingAPK = nil }
+                        }
+                        if model.installing {
+                            if let value = model.installProgress {
+                                ProgressView(value: value) { Text("上传 \(Int(value * 100))%") }
+                            } else { ProgressView("电视正在安装") }
+                        }
+                    }
                     Section("连接状态") {
                         Text(model.status).foregroundStyle(model.connected == nil ? Color.secondary : Color.green)
                         if model.busy { ProgressView() }
@@ -127,20 +158,6 @@ struct Root: View {
                         }.onDelete { indices in model.devices.remove(atOffsets: indices); model.save() }
                         Button("添加设备", systemImage: "plus") { adding = true }
                     }
-                    Section("快捷命令") {
-                        Button("设备型号") { model.run("getprop ro.product.model") }
-                        Button("Android 版本") { model.run("getprop ro.build.version.release") }
-                        Button("存储空间") { model.run("df -h") }
-                    }.disabled(model.connected == nil || model.busy)
-                    Section("APK 安装") {
-                        Button("安装 APK 到电视", systemImage: "square.and.arrow.up") { pickingAPK = true }
-                            .disabled(model.connected == nil || model.busy)
-                        if model.installing {
-                            if let value = model.installProgress {
-                                ProgressView(value: value) { Text("上传 \(Int(value * 100))%") }
-                            } else { ProgressView("电视正在安装") }
-                        }
-                    }
                     Section("应用管理") {
                         Button("刷新已安装的第三方应用") { model.run("pm list packages -3", list: true) }.disabled(model.connected == nil || model.busy)
                         ForEach(model.packages, id: \.self) { pkg in
@@ -151,10 +168,13 @@ struct Root: View {
                             }.disabled(model.connected == nil || model.busy)
                         }
                     }
-                }.navigationTitle("ADBX").toolbar { Button("添加", systemImage: "plus") { adding = true } }
-                .fileImporter(isPresented: $pickingAPK, allowedContentTypes: [UTType(filenameExtension: "apk") ?? .data]) { result in
+                }.navigationTitle("ADBX").navigationBarTitleDisplayMode(.inline).toolbar { Button("添加", systemImage: "plus") { adding = true } }
+                .fileImporter(isPresented: $pickingAPK, allowedContentTypes: [.item]) { result in
                     switch result {
-                    case .success(let url): model.install(url)
+                    case .success(let url):
+                        guard url.pathExtension.lowercased() == "apk" else { model.installMessage = "请选择 .apk 文件"; return }
+                        if model.connected != nil && !model.busy { model.install(url) }
+                        else { pendingAPK = url }
                     case .failure(let error): model.installMessage = error.localizedDescription
                     }
                 }
@@ -185,6 +205,16 @@ struct Root: View {
             NavigationStack {
                 VStack(spacing: 12) {
                     Text(model.status).font(.caption).foregroundStyle(.secondary)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack {
+                            ForEach(Array(shortcuts.enumerated()), id: \.offset) { item in
+                                Button(item.element.0) { model.run(item.element.1) }
+                                    .buttonStyle(.bordered)
+                                    .disabled(model.connected == nil || model.busy)
+                            }
+                        }
+                    }
+                    Text("点击快捷命令直接执行，也可手动输入 adb shell 后面的命令。").font(.caption).foregroundStyle(.secondary)
                     ScrollViewReader { proxy in
                         ScrollView {
                             Text(model.output.isEmpty ? "ADB Shell" : model.output).font(.system(.footnote, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
@@ -195,30 +225,26 @@ struct Root: View {
                         TextField("输入 Shell 命令", text: $command).textInputAutocapitalization(.never).autocorrectionDisabled().textFieldStyle(.roundedBorder).onSubmit(execute)
                         Button("执行", action: execute).disabled(model.connected == nil || model.busy || command.isEmpty)
                     }
-                }.padding().navigationTitle("终端").toolbar { Button("清空") { model.output = "" } }
+                }.padding().navigationTitle("终端").navigationBarTitleDisplayMode(.inline).toolbar { Button("清空") { model.output = "" } }
             }.tabItem { Label("终端", systemImage: "terminal") }
-            NavigationStack {
-                VStack(spacing: 22) {
-                    Text(model.connected?.name ?? "未连接电视").foregroundStyle(.secondary)
-                    HStack { key("house", 3); key("arrow.uturn.backward", 4); key("line.3.horizontal", 82) }
-                    key("chevron.up", 19)
-                    HStack { key("chevron.left", 21); key("circle.fill", 23); key("chevron.right", 22) }
-                    key("chevron.down", 20)
-                    HStack { key("speaker.minus", 25); key("speaker.slash", 164); key("speaker.plus", 24) }
-                    HStack { key("backward.end", 89); key("playpause", 85); key("forward.end", 90) }
-                    Spacer()
-                }.padding(.top, 30).disabled(model.connected == nil || model.busy).navigationTitle("遥控")
-            }.tabItem { Label("遥控", systemImage: "gamecontroller") }
+
         }.tint(.mint)
     }
+    private let shortcuts: [(String, String)] = [
+        ("设备型号", "getprop ro.product.model"),
+        ("安卓版本", "getprop ro.build.version.release"),
+        ("已安装应用", "pm list packages -3"),
+        ("存储空间", "df -h"),
+        ("内存", "cat /proc/meminfo"),
+        ("运行时间", "uptime"),
+        ("屏幕分辨率", "wm size")
+    ]
     private func execute() {
         guard model.connected != nil, !model.busy, !command.isEmpty else { return }
-        model.run(command); command = ""
+        var value = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("adb shell ") { value = String(value.dropFirst(10)) }
+        guard !value.isEmpty else { return }
+        model.run(value); command = ""
     }
     private func quoted(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-    private func key(_ icon: String, _ code: Int) -> some View {
-        Button { model.run("input keyevent \(code)") } label: {
-            Image(systemName: icon).font(.title2).frame(width: 84, height: 64).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
-        }.buttonStyle(.plain)
-    }
 }
